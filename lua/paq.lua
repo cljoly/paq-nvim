@@ -4,6 +4,7 @@ local uv = vim.uv
 
 ---@class setup_opts
 ---@field path Path
+---@field pin boolean
 ---@field opt boolean
 ---@field verbose boolean
 ---@field log Path
@@ -18,6 +19,7 @@ local Config = {
     pull_args = { "--tags", "--force", "--recurse-submodules", "--update-shallow" },
     lock = vim.fs.joinpath(vim.fn.stdpath("data") --[[@as string]], "paq-lock.json"),
     log = vim.fs.joinpath(vim.fn.stdpath("log") --[[@as string]], "paq.log"),
+    pin = false,
     opt = false,
     path = vim.fs.joinpath(vim.fn.stdpath("data") --[[@as string]], "site", "pack", "paqs"),
     url_format = "https://github.com/%s.git",
@@ -404,6 +406,7 @@ local function register(pkg)
     if not name then
         return vim.notify(" Paq: Failed to parse " .. vim.inspect(pkg), vim.log.levels.ERROR)
     end
+    local pin = pkg.pin or Config.pin and pkg.pin == nil
     local opt = pkg.opt or Config.opt and pkg.opt == nil
     local dir = vim.fs.joinpath(Config.path, (opt and "opt" or "start"), name)
     local ok, hash = pcall(get_git_hash, dir)
@@ -416,7 +419,7 @@ local function register(pkg)
         dir = dir,
         status = uv.fs_stat(dir) and Status.INSTALLED or Status.TO_INSTALL,
         hash = hash,
-        pin = pkg.pin,
+        pin = pin,
         build = pkg.build,
         url = url,
     }
