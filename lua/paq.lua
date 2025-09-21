@@ -219,6 +219,7 @@ end
 ---@field name string
 ---@field as string
 ---@field branch string
+---@field revision string
 ---@field dir string
 ---@field status Status
 ---@field hash string
@@ -232,7 +233,9 @@ end
 ---@param build_queue table
 local function clone(pkg, counter, build_queue)
     local args = vim.list_extend({ "git", "clone", pkg.url }, Config.clone_args)
-    if pkg.branch then
+    if pkg.revision then
+        vim.list_extend(args, { "--revision", pkg.revision })
+    elseif pkg.branch then
         vim.list_extend(args, { "-b", pkg.branch })
     end
     table.insert(args, pkg.dir)
@@ -254,6 +257,29 @@ end
 ---@param build_queue table
 local function pull(pkg, counter, build_queue)
     local prev_hash = Lock[pkg.name] and Lock[pkg.name].hash or pkg.hash
+    ---Perform post update book keeping: update the lockfile, counters...
+    ---@param cur_hash any
+    local function book_keeping(cur_hash)
+        -- It can happen that the user has deleted manually a directory.
+        -- Thus the pkg.hash is left blank and we need to update it.
+        if cur_hash == prev_hash or prev_hash == "" then
+            pkg.hash = cur_hash
+            counter(pkg.name, Messages.update, "nop")
+            return
+        end
+        log_update_changes(pkg, prev_hash, cur_hash)
+        pkg.status, pkg.hash = Status.UPDATED, cur_hash
+        lock_write()
+        counter(pkg.name, Messages.update, "ok")
+        if pkg.build then
+            table.insert(build_queue, pkg)
+        end
+    end
+    -- Update only if revision changed or was removed
+    if pkg.revision and prev_hash == pkg.revision then
+        book_keeping(prev_hash)
+        return
+    end
     vim.system(
         vim.list_extend({ "git", "pull" }, Config.pull_args),
         { cwd = pkg.dir },
@@ -264,21 +290,22 @@ local function pull(pkg, counter, build_queue)
                 file_write(Config.log, "a+", errmsg)
                 return
             end
+            if pkg.revision then
+                vim.system({ "git", "checkout", pkg.revision }, { cwd = pkg.dir }, function(obj1)
+                    if obj1.code ~= 0 then
+                        counter(pkg.name, Messages.update, "err")
+                        local errmsg = ("\nFailed to checkout revision %s:\n%s\n"):format(
+                            pkg.name,
+                            obj1.stderr
+                        )
+                        file_write(Config.log, "a+", errmsg)
+                        return
+                    end
+                    book_keeping(pkg.revision)
+                end)
+            end
             local cur_hash = get_git_hash(pkg.dir)
-            -- It can happen that the user has deleted manually a directory.
-            -- Thus the pkg.hash is left blank and we need to update it.
-            if cur_hash == prev_hash or prev_hash == "" then
-                pkg.hash = cur_hash
-                counter(pkg.name, Messages.update, "nop")
-                return
-            end
-            log_update_changes(pkg, prev_hash, cur_hash)
-            pkg.status, pkg.hash = Status.UPDATED, cur_hash
-            lock_write()
-            counter(pkg.name, Messages.update, "ok")
-            if pkg.build then
-                table.insert(build_queue, pkg)
-            end
+            book_keeping(cur_hash)
         end
     )
 end
@@ -385,6 +412,7 @@ local function register(pkg)
     Packages[name] = {
         name = name,
         branch = pkg.branch,
+        revision = pkg.revision,
         dir = dir,
         status = uv.fs_stat(dir) and Status.INSTALLED or Status.TO_INSTALL,
         hash = hash,
