@@ -101,7 +101,17 @@ local function get_git_hash(dir)
         return vim.split(data, "\n")[1]
     end
     local head_ref = first_line(vim.fs.joinpath(dir, ".git", "HEAD"))
-    return head_ref and first_line(vim.fs.joinpath(dir, ".git", head_ref:sub(6, -1)))
+    if head_ref then
+        if head_ref:sub(1, 5) == "ref: " then
+            return first_line(vim.fs.joinpath(dir, ".git", head_ref:sub(6, -1)))
+        -- If the repo was cloned with a particular revision, the ref is
+        -- directly written in the file, just return it
+        elseif #head_ref == 40 then
+            return head_ref
+        end
+    end
+    -- The ref might be missing
+    return head_ref
 end
 
 ---@param path string Path to remove
